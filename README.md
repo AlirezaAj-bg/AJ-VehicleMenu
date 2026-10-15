@@ -19,8 +19,8 @@ Plus, at the top of the menu you always get **live stats**: speed, gear, fuel, e
 
 ## 📸 Preview
 
-[url=https://postimg.cc/mPrkp4rZ][img]https://i.postimg.cc/mPrkp4rZ/Screenshot-2026-10-10-203146.png[/img][/url]
-[url=https://postimg.cc/Wd4zYV4z][img]https://i.postimg.cc/Wd4zYV4z/Screenshot-2026-10-10-203204.png[/img][/url]
+<a href="https://postimg.cc/mPrkp4rZ" target="_blank"><img src="https://i.postimg.cc/mPrkp4rZ/Screenshot-2026-10-10-203146.png" alt="Screenshot-2026-10-10-203146"></a><br><br>
+<a href="https://postimg.cc/Wd4zYV4z" target="_blank"><img src="https://i.postimg.cc/Wd4zYV4z/Screenshot-2026-10-10-203204.png" alt="Screenshot-2026-10-10-203204"></a><br><br>
 
 
 ## 🔧 Installation
