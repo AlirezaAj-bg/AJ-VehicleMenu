@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AJ Vehicle Menu</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="vendor/vue.global.prod.js"></script>
+</head>
+<body>
+<div id="app">
+    <transition name="dock">
+        <div class="vm" v-if="open" :class="['ctx-' + context]">
+
+            <!-- ============================ HEADER / LIVE STATS ============================ -->
+            <div class="hero">
+                <div class="hero-id">
+                    <div class="ctx-chip">
+                        <svg viewBox="0 0 24 24" v-html="icon(context === 'remote' ? 'key' : (context === 'driver' ? 'wheel' : 'seat'))"></svg>
+                        <span>{{ contextLabel }}</span>
+                        <span class="signal" v-if="context === 'remote'">
+                            <i v-for="n in 4" :key="n" :class="{ on: n <= (stats.signal || 0) }"></i>
+                        </span>
+                    </div>
+                    <div class="veh-name">{{ vehicle.name }}</div>
+                    <div class="plate"><span>{{ vehicle.plate }}</span></div>
+                </div>
+
+                <div class="hero-speed" v-if="context !== 'remote'">
+                    <div class="speed-row">
+                        <div class="speed">{{ pad(stats.speed) }}</div>
+                        <div class="speed-meta">
+                            <span class="unit">{{ config.unit }}</span>
+                            <span class="gear">{{ gearLabel }}</span>
+                        </div>
+                    </div>
+                    <div class="rpm">
+                        <i v-for="n in 26" :key="n" :class="{ on: n <= rpmLit, red: n > 21 }"></i>
+                    </div>
+                </div>
+                <div class="hero-speed remote-dist" v-else>
+                    <div class="speed-row">
+                        <div class="speed">{{ stats.distance }}</div>
+                        <div class="speed-meta"><span class="unit">METRES</span><span class="gear dim">RANGE</span></div>
+                    </div>
+                    <div class="range-bar"><i :style="{ width: rangePct + '%' }"></i></div>
+                </div>
+
+                <div class="hero-gauges">
+                    <div class="ring" v-for="g in gauges" :key="g.key" :class="g.tone">
+                        <svg viewBox="0 0 40 40">
+                            <circle class="track" cx="20" cy="20" r="16"/>
+                            <circle class="bar" cx="20" cy="20" r="16" :style="{ strokeDashoffset: 100.53 - (100.53 * Math.min(100, g.value) / 100) }"/>
+                        </svg>
+                        <div class="ring-icon"><svg viewBox="0 0 24 24" v-html="icon(g.icon)"></svg></div>
+                        <div class="ring-val">{{ g.value }}<small>%</small></div>
+                        <div class="ring-lbl">{{ g.label }}</div>
+                    </div>
+                </div>
+
+                <div class="hero-pills">
+                    <span class="pill" :class="state.engine ? 'ok' : 'off'"><svg viewBox="0 0 24 24" v-html="icon('engine')"></svg>{{ state.engine ? 'Running' : 'Off' }}</span>
+                    <span class="pill" :class="state.locked ? 'ok' : 'warn'"><svg viewBox="0 0 24 24" v-html="icon(state.locked ? 'lock' : 'unlock')"></svg>{{ state.locked ? 'Locked' : 'Unlocked' }}</span>
+                    <span class="pill" v-if="stats.belt !== undefined && stats.belt !== null" :class="stats.belt ? 'ok' : 'bad'"><svg viewBox="0 0 24 24" v-html="icon('belt')"></svg>{{ stats.belt ? 'Belted' : 'No belt' }}</span>
+                    <span class="pill accent" v-if="context === 'driver' && state.driving && state.driving.cruise.on"><svg viewBox="0 0 24 24" v-html="icon('cruise')"></svg>{{ state.driving.cruise.speed }}</span>
+                    <span class="pill accent" v-if="context === 'driver' && state.driving && state.driving.limiter.on"><svg viewBox="0 0 24 24" v-html="icon('limiter')"></svg>{{ state.driving.limiter.speed }}</span>
+                </div>
+
+                <button class="close-btn" @click="close" title="Close (Esc)"><svg viewBox="0 0 24 24" v-html="icon('close')"></svg></button>
+            </div>
+
+            <!-- ============================ DOCK ============================ -->
+            <div class="dock">
+
+                <!-- seats -->
+                <div class="group seats-col" v-if="context !== 'remote'">
+                    <div class="g-head">Seats <b>{{ occupied }}/{{ stats.seats ? stats.seats.length : 0 }}</b></div>
+                    <div class="seat-list">
+                        <button v-for="(s, i) in stats.seats" :key="s.index" class="tile seat"
+                                :class="{ me: s.me, taken: s.occupied && !s.me, disabled: !can('seat') }"
+                                @click="seat(s)">
+                            <svg viewBox="0 0 24 24" v-html="icon(s.index === -1 ? 'wheel' : (s.occupied && !s.me ? 'person' : 'seat'))"></svg>
+                            <span class="t-key">{{ i + 1 }}</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="main">
+                    <!-- tabs -->
+                    <div class="tabs" v-if="context !== 'remote' && visibleTabs.length > 1">
+                        <button v-for="t in visibleTabs" :key="t.id" class="tab" :class="{ active: tab === t.id }" @click="tab = t.id">
+                            <svg viewBox="0 0 24 24" v-html="icon(t.icon)"></svg>{{ t.label }}
+                        </button>
+                        <div class="tab-glider" :style="gliderStyle"></div>
+                    </div>
+
+
+                    <!-- ------------------------ CONTROL ------------------------ -->
+                    <div class="page" v-if="context !== 'remote' && tab === 'control'" key="control">
+                        <div class="group" v-if="!vehicle.isBike">
+                            <div class="g-head">Doors</div>
+                            <div class="car-wrap">
+                                <svg class="car" viewBox="0 0 140 250">
+                                    <rect class="car-body" x="30" y="20" width="80" height="210" rx="32"/>
+                                    <rect class="part hood" x="37" y="27" width="66" height="46" rx="20"
+                                          :class="{ open: state.doors[4], disabled: !vehicle.doors[4] || !can('door', 4) }" @click="act('door', 4)"/>
+                                    <path class="glass" d="M40 80 L100 80 L94 100 L46 100 Z"/>
+                                    <rect class="roof" x="44" y="102" width="52" height="66" rx="8"/>
+                                    <path class="glass" d="M46 170 L94 170 L98 182 L42 182 Z"/>
+                                    <rect class="part trunk" x="38" y="186" width="64" height="38" rx="15"
+                                          :class="{ open: state.doors[5], disabled: !vehicle.doors[5] || !can('door', 5) }" @click="act('door', 5)"/>
+                                    <rect class="part door left" x="24" y="90" width="12" height="46" rx="4"
+                                          :class="{ open: state.doors[0], disabled: !vehicle.doors[0] || !can('door', 0) }" @click="act('door', 0)"/>
+                                    <rect class="part door right" x="104" y="90" width="12" height="46" rx="4"
+                                          :class="{ open: state.doors[1], disabled: !vehicle.doors[1] || !can('door', 1) }" @click="act('door', 1)"/>
+                                    <rect class="part door left" x="24" y="140" width="12" height="42" rx="4"
+                                          :class="{ open: state.doors[2], disabled: !vehicle.doors[2] || !can('door', 2) }" @click="act('door', 2)"/>
+                                    <rect class="part door right" x="104" y="140" width="12" height="42" rx="4"
+                                          :class="{ open: state.doors[3], disabled: !vehicle.doors[3] || !can('door', 3) }" @click="act('door', 3)"/>
+                                    <circle v-for="(s, i) in carSeats" :key="'s' + i" class="seat-dot" :class="{ me: s.me, taken: s.occupied && !s.me }" :cx="s.x" :cy="s.y" r="7"/>
+                                </svg>
+                                <div class="car-legend">
+                                    <button class="mini" :class="{ active: anyDoorOpen, disabled: !can('doorsAll') }" @click="act('doorsAll')">
+                                        <svg viewBox="0 0 24 24" v-html="icon('doors')"></svg>{{ anyDoorOpen ? 'Close all' : 'Open all' }}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="group">
+                            <div class="g-head">Auxiliary</div>
+                            <div class="grid c3">
+                                <button class="tile" :class="{ active: state.engine, disabled: !can('engine') }" @click="act('engine')"><svg viewBox="0 0 24 24" v-html="icon('engine')"></svg><span>Engine</span></button>
+                                <button class="tile" :class="{ active: state.lights, disabled: !can('lights') }" @click="act('lights')"><svg viewBox="0 0 24 24" v-html="icon('lights')"></svg><span>Lights</span></button>
+                                <button class="tile" :class="{ active: state.highbeam, disabled: !can('highbeam') }" @click="act('highbeam')"><svg viewBox="0 0 24 24" v-html="icon('highbeam')"></svg><span>High beam</span></button>
+                                <button class="tile" :class="{ active: state.cabin, disabled: !can('cabin') }" @click="act('cabin')"><svg viewBox="0 0 24 24" v-html="icon('cabin')"></svg><span>Cabin</span></button>
+                                <button class="tile" :class="{ disabled: !can('horn') }" @click="act('horn')"><svg viewBox="0 0 24 24" v-html="icon('horn')"></svg><span>Horn</span></button>
+                                <button class="tile" :class="{ active: state.locked, disabled: !can('lock') }" @click="act('lock')"><svg viewBox="0 0 24 24" v-html="icon(state.locked ? 'lock' : 'unlock')"></svg><span>{{ state.locked ? 'Locked' : 'Lock' }}</span></button>
+                            </div>
+                        </div>
+
+                        <div class="group">
+                            <div class="g-head">Windows</div>
+                            <div class="grid c2">
+                                <button v-for="w in windowTiles" :key="w.i" class="tile"
+                                        :class="{ active: state.windows[w.i], disabled: !vehicle.windows[w.i] || !can('window', w.i), own: perms.ownWindow === w.i && context === 'passenger' }"
+                                        @click="act('window', w.i)">
+                                    <svg viewBox="0 0 24 24" v-html="icon(state.windows[w.i] ? 'window' : 'windowUp')"></svg><span>{{ w.label }}</span>
+                                </button>
+                            </div>
+                            <button class="mini wide" :class="{ active: anyWindowDown, disabled: !can('windowsAll') }" @click="act('windowsAll')">{{ anyWindowDown ? 'All up' : 'All down' }}</button>
+                        </div>
+
+                        <div class="group">
+                            <div class="g-head">Signals</div>
+                            <div class="signals">
+                                <button class="sig" :class="{ blink: state.indicator === 1 || state.indicator === 3, disabled: !can('indicator') }" @click="act('indicator', 'left')"><svg viewBox="0 0 24 24" v-html="icon('left')"></svg></button>
+                                <button class="sig hz" :class="{ blink: state.indicator === 3, disabled: !can('hazards') }" @click="act('hazards')"><svg viewBox="0 0 24 24" v-html="icon('hazard')"></svg></button>
+                                <button class="sig" :class="{ blink: state.indicator === 2 || state.indicator === 3, disabled: !can('indicator') }" @click="act('indicator', 'right')"><svg viewBox="0 0 24 24" v-html="icon('right')"></svg></button>
+                            </div>
+                            <div class="g-head mt">Body</div>
+                            <div class="grid c3">
+                                <button class="tile" :class="{ active: state.doors[4], disabled: !vehicle.doors[4] || !can('door', 4) }" @click="act('door', 4)"><svg viewBox="0 0 24 24" v-html="icon('hood')"></svg><span>Hood</span></button>
+                                <button class="tile" :class="{ active: state.doors[5], disabled: !vehicle.doors[5] || !can('door', 5) }" @click="act('door', 5)"><svg viewBox="0 0 24 24" v-html="icon('trunk')"></svg><span>Trunk</span></button>
+                                <button class="tile" :class="{ active: state.alarm, danger: state.alarm, disabled: !can('alarm') }" @click="act('alarm')"><svg viewBox="0 0 24 24" v-html="icon('alarm')"></svg><span>Alarm</span></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ------------------------ DRIVE ------------------------ -->
+                    <div class="page" v-else-if="context !== 'remote' && tab === 'drive'" key="drive">
+                        <div class="card cruise" :class="{ on: drv.cruise.on, disabled: !can('cruise') }">
+                            <div class="card-top">
+                                <div class="card-title"><svg viewBox="0 0 24 24" v-html="icon('cruise')"></svg>Cruise control</div>
+                                <button class="switch" :class="{ on: drv.cruise.on }" @click="act('cruise')"><i></i></button>
+                            </div>
+                            <div class="big-val">
+                                <button class="step" :disabled="!drv.cruise.on" @click="act('cruiseAdjust', -1)"><svg viewBox="0 0 24 24" v-html="icon('minus')"></svg></button>
+                                <div><b>{{ drv.cruise.on ? drv.cruise.speed : '--' }}</b><small>{{ config.unit }}</small></div>
+                                <button class="step" :disabled="!drv.cruise.on" @click="act('cruiseAdjust', 1)"><svg viewBox="0 0 24 24" v-html="icon('plus')"></svg></button>
+                            </div>
+                            <div class="hint">{{ config.ownCruise ? 'Locks your current speed. Brake to cancel.' : 'Uses the server cruise control.' }}</div>
+                        </div>
+
+                        <div class="card limiter" :class="{ on: drv.limiter.on, disabled: !can('limiter') }">
+                            <div class="card-top">
+                                <div class="card-title"><svg viewBox="0 0 24 24" v-html="icon('limiter')"></svg>Speed limiter</div>
+                                <button class="switch" :class="{ on: drv.limiter.on }" @click="act('limiter')"><i></i></button>
+                            </div>
+                            <div class="big-val"><div><b>{{ limiterDraft }}</b><small>{{ config.unit }}</small></div></div>
+                            <input type="range" class="slider" :min="config.limiter.min" :max="config.limiter.max" step="5"
+                                   v-model.number="limiterDraft" @change="act('limiterSpeed', limiterDraft)"
+                                   :style="{ '--p': ((limiterDraft - config.limiter.min) / (config.limiter.max - config.limiter.min) * 100) + '%' }">
+                        </div>
+
+                        <div class="card modes" :class="{ disabled: !can('driveMode') }">
+                            <div class="card-top">
+                                <div class="card-title"><svg viewBox="0 0 24 24" v-html="icon('mode')"></svg>Drive mode</div>
+                                <span class="req" v-if="!hasItem('driveMode')" :title="'Requires ' + itemLabel('driveMode')"><svg viewBox="0 0 24 24" v-html="icon('lock')"></svg>{{ itemLabel('driveMode') }}</span>
+                            </div>
+                            <div class="seg" :class="{ locked: !hasItem('driveMode') }">
+                                <button v-for="m in config.driveModes" :key="m.id"
+                                        :class="['m-' + m.id, { active: drv.mode === m.id, locked: !hasItem('driveMode') && m.id !== config.defaultMode }]"
+                                        @click="act('driveMode', m.id)">{{ m.label }}</button>
+                            </div>
+                            <div class="hint">{{ modeHint }}</div>
+                            <div class="card-row">
+                                <button class="tile sm" :class="{ active: !!drv.launch, pulse: drv.launch === 'charging', locked: !hasItem('launch') && !drv.launch }"
+                                        :title="hasItem('launch') ? '' : 'Requires ' + itemLabel('launch')" @click="act('launch')">
+                                    <svg viewBox="0 0 24 24" v-html="icon(!hasItem('launch') && !drv.launch ? 'lock' : 'launch')"></svg><span>{{ drv.launch === 'charging' ? 'Charging' : 'Launch' }}</span>
+                                </button>
+                                <button class="tile sm" :class="{ active: drv.tcs, danger: !drv.tcs, locked: !hasItem('tcs') && drv.tcs }"
+                                        :title="hasItem('tcs') ? '' : 'Requires ' + itemLabel('tcs')" @click="act('tcs')">
+                                    <svg viewBox="0 0 24 24" v-html="icon(!hasItem('tcs') && drv.tcs ? 'lock' : 'tcs')"></svg><span>{{ drv.tcs ? 'TCS on' : 'TCS off' }}</span>
+                                </button>
+                            </div>
+                            <div class="req-list" v-if="!hasItem('launch') || !hasItem('tcs')">
+                                <span v-if="!hasItem('launch')">Launch needs <b>{{ itemLabel('launch') }}</b></span>
+                                <span v-if="!hasItem('tcs')">TCS off needs <b>{{ itemLabel('tcs') }}</b></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ------------------------ LIGHTS ------------------------ -->
+                    <div class="page" v-else-if="context !== 'remote' && tab === 'lights'" key="lights">
+                        <div class="group">
+                            <div class="g-head">Underglow</div>
+                            <div class="car-wrap neon-wrap">
+                                <svg class="car neon-car" viewBox="0 0 140 250" :style="{ '--neon': neonCss }">
+                                    <line class="neon-line" :class="{ on: state.neon[2], disabled: !can('neon', 2) }" x1="44" y1="12" x2="96" y2="12" @click="act('neon', 2)"/>
+                                    <line class="neon-line" :class="{ on: state.neon[3], disabled: !can('neon', 3) }" x1="44" y1="238" x2="96" y2="238" @click="act('neon', 3)"/>
+                                    <line class="neon-line" :class="{ on: state.neon[0], disabled: !can('neon', 0) }" x1="18" y1="50" x2="18" y2="200" @click="act('neon', 0)"/>
+                                    <line class="neon-line" :class="{ on: state.neon[1], disabled: !can('neon', 1) }" x1="122" y1="50" x2="122" y2="200" @click="act('neon', 1)"/>
+                                    <rect class="car-body" x="30" y="20" width="80" height="210" rx="32"/>
+                                    <rect class="roof" x="44" y="102" width="52" height="66" rx="8"/>
+                                    <path class="glass" d="M40 80 L100 80 L94 100 L46 100 Z"/>
+                                    <path class="glass" d="M46 170 L94 170 L98 182 L42 182 Z"/>
+                                </svg>
+                                <div class="car-legend">
+                                    <button class="mini" :class="{ active: anyNeon, disabled: !can('neonAll') }" @click="act('neonAll')"><svg viewBox="0 0 24 24" v-html="icon('neon')"></svg>{{ anyNeon ? 'All off' : 'All on' }}</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="group grow">
+                            <div class="g-head">Headlights &amp; sirens</div>
+                            <div class="grid c3">
+                                <button class="tile" :class="{ active: state.lights, disabled: !can('lights') }" @click="act('lights')"><svg viewBox="0 0 24 24" v-html="icon('lights')"></svg><span>Headlights</span></button>
+                                <button class="tile" :class="{ active: state.cabin, disabled: !can('cabin') }" @click="act('cabin')"><svg viewBox="0 0 24 24" v-html="icon('cabin')"></svg><span>Cabin</span></button>
+                                <button class="tile" v-if="vehicle.xenon" :class="{ active: state.xenon, disabled: !can('xenon') }" @click="act('xenon')"><svg viewBox="0 0 24 24" v-html="icon('xenon')"></svg><span>Xenon</span></button>
+                                <button class="tile" :class="{ active: state.highbeam, disabled: !can('highbeam') }" @click="act('highbeam')"><svg viewBox="0 0 24 24" v-html="icon('highbeam')"></svg><span>High beam</span></button>
+                                <button class="tile" :class="{ active: state.siren, disabled: !vehicle.isEmergency || !can('siren') }" @click="act('siren')"><svg viewBox="0 0 24 24" v-html="icon('siren')"></svg><span>{{ state.siren ? 'Muted' : 'Siren mute' }}</span></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ------------------------ EXTRAS ------------------------ -->
+                    <div class="page" v-else-if="context !== 'remote' && tab === 'extras'" key="extras">
+                        <div class="group grow">
+                            <div class="g-head">Vehicle extras <b>{{ vehicle.extras.length }}</b></div>
+                            <div class="grid c7">
+                                <button v-for="id in vehicle.extras" :key="id" class="tile" :class="{ active: state.extras[String(id)], disabled: !can('extra') }" @click="act('extra', id)">
+                                    <svg viewBox="0 0 24 24" v-html="icon('extras')"></svg><span>Extra {{ id }}</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ------------------------ KEYFOB ------------------------ -->
+                    <div class="page fob" v-else-if="context === 'remote'" key="fob">
+                        <div class="fob-main">
+                            <button class="fob-lock" :class="{ locked: state.locked }" @click="act('lock')">
+                                <svg viewBox="0 0 24 24" v-html="icon(state.locked ? 'lock' : 'unlock')"></svg>
+                                <span>{{ state.locked ? 'Unlock' : 'Lock' }}</span>
+                            </button>
+                            <div class="fob-status">{{ state.locked ? 'Vehicle is locked' : 'Vehicle is unlocked' }}</div>
+                        </div>
+                        <div class="group">
+                            <div class="g-head">Remote</div>
+                            <div class="grid c3">
+                                <button class="tile" :class="{ active: state.engine, disabled: !can('remoteEngine') }" @click="act('remoteEngine')"><svg viewBox="0 0 24 24" v-html="icon('engine')"></svg><span>{{ state.engine ? 'Stop' : 'Start' }}</span></button>
+                                <button class="tile" :class="{ disabled: !can('flash') }" @click="act('flash')"><svg viewBox="0 0 24 24" v-html="icon('flash')"></svg><span>Flash</span></button>
+                                <button class="tile" :class="{ disabled: !can('horn') }" @click="act('horn')"><svg viewBox="0 0 24 24" v-html="icon('horn')"></svg><span>Horn</span></button>
+                                <button class="tile" :class="{ active: state.alarm, danger: state.alarm, disabled: !can('alarm') }" @click="act('alarm')"><svg viewBox="0 0 24 24" v-html="icon('alarm')"></svg><span>Panic</span></button>
+                                <button class="tile" :class="{ active: state.doors[5], disabled: !vehicle.doors[5] || !can('door') }" @click="act('door', 5)"><svg viewBox="0 0 24 24" v-html="icon('trunk')"></svg><span>Trunk</span></button>
+                                <button class="tile" :class="{ active: anyNeon, disabled: !can('neonAll') }" @click="act('neonAll')"><svg viewBox="0 0 24 24" v-html="icon('neon')"></svg><span>Neon</span></button>
+                            </div>
+                        </div>
+                        <div class="group">
+                            <div class="g-head">Access</div>
+                            <div class="grid c1">
+                                <button class="tile wide" :class="{ active: anyDoorOpen, disabled: !can('doorsAll') }" @click="act('doorsAll')"><svg viewBox="0 0 24 24" v-html="icon('doors')"></svg><span>{{ anyDoorOpen ? 'Close doors' : 'Open doors' }}</span></button>
+                                <button class="tile wide" :class="{ active: anyWindowDown, disabled: !can('windowsAll') }" @click="act('windowsAll')"><svg viewBox="0 0 24 24" v-html="icon(anyWindowDown ? 'windowUp' : 'window')"></svg><span>{{ anyWindowDown ? 'Windows up' : 'Windows down' }}</span></button>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <div class="foot">
+                <span><kbd>ESC</kbd> close</span>
+                <span v-if="context !== 'remote'"><kbd>1</kbd>–<kbd>{{ stats.seats ? stats.seats.length : 1 }}</kbd> seats</span>
+                <span v-if="context === 'passenger'" class="dim">Passenger: limited controls</span>
+            </div>
+        </div>
+    </transition>
+</div>
+
+<script src="js/nui.js"></script>
+<script src="js/icons.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
